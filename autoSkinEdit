@@ -1,0 +1,132 @@
+/// <summary>
+/// This script monitors a specified folder for new image files (JPG, PNG, TIFF) and triggers events
+/// when files are added. It ensures Adobe Photoshop remains open for editing these images.
+/// This script must be run with administrator access.
+/// </summary>
+/// <author>Kai Mallari</author>
+/// <created>February 2024</created>
+using System.Diagnostics;
+using TypeLibrary;
+
+class autoSkinEdit
+{
+    private static bool photoshopRunning; // Tracks if Photoshop is currently running
+    private static int numImagesToEdit = 0; // Number of images waiting to be processed
+    private static string inputFolder = @"C:\FolderPath\inputFolder"; // Monitored folder path
+    private static string outputFolder = @"C:\FolderPath\outputFolder"; // Output folder path
+
+    /// <summary>
+    /// Checks if Photoshop is currently running on the system.
+    /// </summary>
+    private static void checkPhotoshopRunning()
+    {
+        Process[] photoshopProcess = Process.GetProcessesByName("Photoshop");
+        photoshopRunning = photoshopProcess.Length > 0;
+    }
+
+    /// <summary>
+    /// Ensures that Adobe Photoshop is running; launches Photoshop if it is not already running.
+    /// </summary>
+    private static void runPhotoshop()
+    {
+        int wait = 10000; // Time to wait before attempting to reopen Photoshop
+
+        do
+        {
+            checkPhotoshopRunning();
+            if (!photoshopRunning)
+            {
+                try
+                {
+                    Process.Start(@"C:\FolderPath\Photoshop.exe");
+                    Console.WriteLine("Opening Photoshop");
+                    Thread.Sleep(wait);
+                }
+                catch (Exception except)
+                {
+                    Console.WriteLine("Could not start Photoshop: " + except.Message);
+                }
+            }
+        } while (!photoshopRunning);
+    }
+
+    /// <summary>
+    /// Executes a Photoshop action on a specified image.
+    /// </summary>
+    /// <param name="currentImage">The full path of the image to open and process.</param>
+    static void runAction(string currentImage)
+    {
+        runPhotoshop();
+
+        var photoshop = new PhotoshopApplicationClass();
+        string actionName = "autoSkinEdit";
+
+        try
+        {
+            photoshop.Open(currentImage);
+            photoshop.PlayAction(actionName);
+        }
+        catch (Exception except)
+        {
+            Console.WriteLine("Error executing Photoshop action: " + except.Message);
+        }
+    }
+
+    /// <summary>
+    /// Initializes and configures a FileSystemWatcher to monitor for new image files.
+    /// </summary>
+    /// <param name="filter">The file type to monitor (e.g., "*.jpg").</param>
+    /// <returns>A configured FileSystemWatcher.</returns>
+    static FileSystemWatcher CreateWatcher(string filter)
+    {
+        FileSystemWatcher watcher = new FileSystemWatcher
+        {
+            Path = inputFolder,
+            NotifyFilter = NotifyFilters.FileName,
+            Filter = filter,
+            IncludeSubdirectories = true
+        };
+
+        watcher.Created += onFileAdd; // Attach event handler for added files
+        watcher.EnableRaisingEvents = true;
+        return watcher;
+    }
+
+    /// <summary>
+    /// Handles the event when a new file is added to the monitored folder.
+    /// </summary>
+    /// <param name="source">The source of the event.</param>
+    /// <param name="systemEvent">Information about the file added.</param>
+    static void onFileAdd(object source, FileSystemEventArgs systemEvent)
+    {
+        numImagesToEdit++;
+        Console.WriteLine("File Added: " + systemEvent.Name);
+        string outputFile = Path.Combine(outputFolder, Path.GetFileName(systemEvent.FullPath));
+
+        while (numImagesToEdit != 0)
+        {
+            try
+            {
+                File.Copy(systemEvent.FullPath, outputFile, overwrite: true);
+                File.Delete(systemEvent.FullPath);
+                runAction(outputFile);
+                numImagesToEdit--;
+            }
+            catch (Exception except)
+            {
+                Console.WriteLine("An error occurred: " + except.Message);
+            }
+        }
+    }
+
+    static void Main(string[] args)
+    {
+        FileSystemWatcher watcherJpg = CreateWatcher("*.jpg");
+        FileSystemWatcher watcherPng = CreateWatcher("*.png");
+        FileSystemWatcher watcherTiff = CreateWatcher("*.tiff");
+
+        Console.WriteLine("Watching Folder: " + inputFolder);
+        Console.WriteLine("Press 'Enter' to quit the program.");
+        Console.ReadLine();
+    }
+}
